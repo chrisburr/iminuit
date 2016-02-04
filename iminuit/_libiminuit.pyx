@@ -22,15 +22,42 @@ include "Minuit2Struct.pxi"
 __all__ = ['Minuit']
 
 
-# Our wrapper
+# Our wrappers
+cdef extern from "PythonFCNBase.h":
+    cdef cppclass PythonFCNBase:
+        PythonFCNBase(object fcn, double up_parm, vector[string] pname, bint thrownan)
+        double call "operator()"(vector[double] x) except +  #raise_py_err
+        double Up()
+        int getNumCall()
+        void set_up(double up)
+        void resetNumCall()
+
+cdef extern from "Minuit2/FCNBase.h":
+    cdef cppclass FCNBase:
+        FCNBase(object fcn, double up_parm, vector[string] pname, bint thrownan)
+        double call "operator()"(vector[double] x) except +  #raise_py_err
+        double Up()
+
 cdef extern from "PythonFCN.h":
     #int raise_py_err()#this is very important we need custom error handler
     FunctionMinimum*call_mnapplication_wrapper( \
             MnApplication app, unsigned int i, double tol) except +
-    cdef cppclass PythonFCN(FCNBase):
+    cdef cppclass PythonFCN(FCNBase, PythonFCNBase):
         PythonFCN( \
                 object fcn, double up_parm, vector[string] pname, bint thrownan)
         double call "operator()"(vector[double] x) except +  #raise_py_err
+        double Up()
+        int getNumCall()
+        void set_up(double up)
+        void resetNumCall()
+
+cdef extern from "PythonGradientFCN.h":
+    #int raise_py_err()#this is very important we need custom error handler
+    cdef cppclass PythonGradientFCN(FCNBase, PythonFCNBase):
+        PythonGradientFCN( \
+                object fcn, object gradfcn, double up_parm, vector[string] pname, bint thrownan)
+        double call "operator()"(vector[double] x) except +  #raise_py_err
+        vector[double] call "gradient()"(vector[double] x) except +  #raise_py_err
         double Up()
         int getNumCall()
         void set_up(double up)
@@ -46,6 +73,9 @@ cdef class Minuit:
 
     cdef readonly object fcn
     """Cost function (usually a chi^2 or likelihood function)"""
+
+    cdef readonly object gradfcn
+    """Gradient function of the cost function"""
 
     # TODO: remove or expose?
     # cdef readonly object varname #:variable names
@@ -63,7 +93,8 @@ cdef class Minuit:
     cdef object initialfix  #:hold initial fix state
 
     # C++ object state
-    cdef PythonFCN*pyfcn  #:FCN
+    # TODO find a nicer fix: cdef PythonFCN*pyfcn  #:FCN
+    cdef PythonFCNBase*pyfcn  #:FCN
     cdef MnApplication*minimizer  #:migrad
     cdef FunctionMinimum*cfmin  #:last migrad result
     #:last parameter state(from hesse/migrad)
@@ -193,7 +224,7 @@ cdef class Minuit:
     def __init__(self, fcn,
                  throw_nan=False, pedantic=True,
                  frontend=None, forced_parameters=None, print_level=1,
-                 errordef=None, **kwds):
+                 errordef=None, gradfcn=None, **kwds):
         """
         Construct minuit object from given *fcn*
 
@@ -292,6 +323,7 @@ cdef class Minuit:
         self._check_extra_args(args, kwds)
         narg = len(args)
         self.fcn = fcn
+        self.gradfcn = gradfcn
 
         self.frontend = self._auto_frontend() if frontend is None else frontend
 
@@ -397,7 +429,7 @@ cdef class Minuit:
             ups = self.initialParameterState()
             strat = new MnStrategy(self.strategy)
             self.minimizer = \
-                new MnMigrad(deref(self.pyfcn), deref(ups), deref(strat))
+                new MnMigrad(deref(<FCNBase*> self.pyfcn), deref(ups), deref(strat))
             del ups;
             ups = NULL
             del strat;
@@ -460,7 +492,7 @@ cdef class Minuit:
         if self.cfmin is NULL:
             raise RuntimeError('Run migrad first')
         hesse = new MnHesse(self.strategy)
-        upst = hesse.call(deref(self.pyfcn), self.cfmin.UserState())
+        upst = hesse.call(deref(<FCNBase*> self.pyfcn), self.cfmin.UserState())
         if not upst.HasCovariance():
             warn("HESSE Failed. Covariance and GlobalCC will not be available",
                  HesseFailedWarning)
@@ -522,7 +554,7 @@ cdef class Minuit:
                     return None
                 continue
             minos = new MnMinos(deref(
-                self.pyfcn), deref(self.cfmin), self.strategy)
+                <FCNBase*> self.pyfcn), deref(self.cfmin), self.strategy)
             mnerror = minos.Minos(index, maxcall)
             self.merrors_struct[vname] = minoserror2struct(mnerror)
             if self.print_level > 0:
@@ -761,11 +793,19 @@ cdef class Minuit:
     cdef construct_FCN(self):
         """Construct or re-construct FCN"""
         del self.pyfcn
-        self.pyfcn = new PythonFCN(
-            self.fcn,
-            self.errordef,
-            self.parameters,
-            self.throw_nan)
+        if self.gradfcn:
+            self.pyfcn = new PythonGradientFCN(
+                self.fcn,
+                self.gradfcn,
+                self.errordef,
+                self.parameters,
+                self.throw_nan)
+        else:
+            self.pyfcn = new PythonFCN(
+                self.fcn,
+                self.errordef,
+                self.parameters,
+                self.throw_nan)
 
     def is_clean_state(self):
         """Check if minuit is in a clean state, ie. no migrad call"""
@@ -1125,7 +1165,7 @@ cdef class Minuit:
         self.pyfcn.set_up(oldup * sigma * sigma)
 
         cdef auto_ptr[MnContours] mnc = auto_ptr[MnContours](
-            new MnContours(deref(self.pyfcn),
+            new MnContours(deref(<FCNBase*> self.pyfcn),
                            deref(self.cfmin),
                            self.strategy))
 
