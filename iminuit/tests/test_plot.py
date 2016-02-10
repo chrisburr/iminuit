@@ -14,45 +14,57 @@ def f1(x, y):
     return (1 - x) ** 2 + 100 * (y - 1) ** 2
 
 
+def f1_grad(x, y):
+    dfdx = -2 * (1 - x)
+    dfdy = 200 * (y - 1)
+    return [dfdx, dfdy]
+
+
 def test_mnprofile():
-    m = Minuit(f1, x=0, y=0, pedantic=False, print_level=1)
-    m.tol = 1e-4
-    m.migrad()
-    assert_less(m.fval, 1e-6)
-    assert_almost_equal(m.values['x'], 1., places=3)
-    assert_almost_equal(m.values['y'], 1., places=3)
-    m.minos('x')
+    m = _run_minos(Minuit(f1, x=0, y=0, pedantic=False, print_level=1), 'x')
+    m.draw_mnprofile('x')
+
+
+def test_mnprofile_with_grad():
+    m = _run_minos(Minuit(f1, x=0, y=0, pedantic=False, print_level=1, grad_fcn=f1_grad), 'x')
     m.draw_mnprofile('x')
 
 
 def test_mncontour():
-    m = Minuit(f1, x=0, y=0, pedantic=False, print_level=1)
-    m.tol = 1e-4
-    m.migrad()
-    assert_less(m.fval, 1e-6)
-    assert_almost_equal(m.values['x'], 1., places=3)
-    assert_almost_equal(m.values['y'], 1., places=3)
-    m.minos()
+    m = _run_minos(Minuit(f1, x=0, y=0, pedantic=False, print_level=1))
+    m.draw_mncontour('x', 'y')
+
+
+def test_mncontour_with_grad():
+    m = _run_minos(Minuit(f1, x=0, y=0, pedantic=False, print_level=1, grad_fcn=f1_grad))
     m.draw_mncontour('x', 'y')
 
 
 def test_drawcontour():
-    m = Minuit(f1, x=0, y=0, pedantic=False, print_level=1)
-    m.tol = 1e-4
-    m.migrad()
-    assert_less(m.fval, 1e-6)
-    assert_almost_equal(m.values['x'], 1., places=3)
-    assert_almost_equal(m.values['y'], 1., places=3)
-    m.minos()
+    m = _run_minos(Minuit(f1, x=0, y=0, pedantic=False, print_level=1))
+    m.draw_contour('x', 'y')
+
+
+def test_drawcontour_with_grad():
+    m = _run_minos(Minuit(f1, x=0, y=0, pedantic=False, print_level=1, grad_fcn=f1_grad))
     m.draw_contour('x', 'y')
 
 
 def test_drawcontour_show_sigma():
-    m = Minuit(f1, x=0, y=0, pedantic=False, print_level=1)
+    m = _run_minos(Minuit(f1, x=0, y=0, pedantic=False, print_level=1))
+    m.draw_contour('x', 'y', show_sigma=True)
+
+
+def test_drawcontour_show_sigma_with_grad():
+    m = _run_minos(Minuit(f1, x=0, y=0, pedantic=False, print_level=1, grad_fcn=f1_grad))
+    m.draw_contour('x', 'y', show_sigma=True)
+
+
+def _run_minos(m, variable=None):
     m.tol = 1e-4
     m.migrad()
     assert_less(m.fval, 1e-6)
     assert_almost_equal(m.values['x'], 1., places=3)
     assert_almost_equal(m.values['y'], 1., places=3)
-    m.minos()
-    m.draw_contour('x', 'y', show_sigma=True)
+    m.minos(variable)
+    return m
